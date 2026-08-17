@@ -1,0 +1,667 @@
+---
+title: "Statistical analyzes : Simon Couillard <br><br>"
+subtitle:
+  "Project : ACQ5 multicohort <br>"
+author: "Reference number : 1206 <br><br> By : Pascal Charland, Samuel Lemaire-Paquette, and Simon Couillard,"
+date: " Last update : `r Sys.Date()`<br><br>"
+output: 
+  html_document:
+    theme : united
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+# Define variable containing url
+url <- "https://www.crchus.ca/clients/SanteEstrie/Sous-sites/Centres_de_recherche/CRCHUS/Medias-publications/signature_CR-CHUS_rvb-s2.jpg"
+```
+
+```{=html}
+<script>
+   $(document).ready(function() {
+     $head = $('#header');
+     $head.prepend('<img src="`r url`" style=\"float: right;width: 200px;\"/>')
+   });
+</script>
+```
+
+```{=html}
+<style>
+body {
+text-align: justify}
+</style>
+```
+
+```{=html}
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+```
+
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+
+```{r Packages setup, include = FALSE}
+
+options(scipen=999)
+
+load_packages <- function(packages) {
+  # Check which packages are not installed
+  not_installed <- packages[!(packages %in% installed.packages()[,"Package"])]
+  
+  # Install missing packages if any
+  if(length(not_installed) > 0) {
+    install.packages(not_installed, dependencies = TRUE)
+  }
+  
+  # Suppress package loading messages
+  suppressPackageStartupMessages({
+    invisible(lapply(packages, library, character.only = TRUE))
+  })
+}
+
+# List of packages
+Packages <- c(
+  "readxl","haven","ggplot2","dplyr","MASS","summarytools","car","lme4","lmerTest","nlme","multcomp","emmeans","ggeffects","ggiraphExtra","sjPlot","sjmisc","qwraps2","extrafont","openxlsx","igraph","gimme","purrr","ggthemes","plotly","knitr","gmodels","tidyverse","infer","skimr","pander", "RColorBrewer","expss","ggrepel","fmsb","lubridate","mgcv","nlme","glmmTMB","lmerTest","mice","table1","splines", "forplo", "cowplot","forestplot",'gridExtra','grid','metafor'
+)
+
+# Load packages
+load_packages(Packages)
+
+```
+
+```{r p-value function, include = FALSE}
+
+# P-value function for tables
+
+pvalue <- function(x, ...) {
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        p <- wilcox.test(y ~ g)$p.value
+    } else {
+        p <- fisher.test(table(y, g))$p.value
+    }
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+pvalue2 <- function(x, ...) {
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times=sapply(x, length)))
+  
+  if (is.numeric(y)) {
+    p <- kruskal.test(y ~ g)$p.value
+  } else {
+    p <- fisher.test(table(y, g), simulate.p.value = TRUE, B = 20000)$p.value
+  }
+  
+  c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+
+pvalue3 <- function(x, ...) {
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        p <- t.test(y ~ g)$p.value
+    } else {
+        p <- fisher.test(table(y, g))$p.value
+    }
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+pvalue4 <- function(x, ...) {
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times = sapply(x, length)))
+  
+  if (is.numeric(y)) {
+    # Use one-way ANOVA instead of Kruskal-Wallis
+    p <- summary(aov(y ~ g))[[1]][["Pr(>F)"]][1]
+  } else {
+    p <- fisher.test(table(y, g), simulate.p.value = TRUE, B = 20000)$p.value
+  }
+  
+  c("", sub("<", "&lt;", format.pval(p, digits = 3, eps = 0.001)))
+}
+
+```
+
+```{r Data PRISMA, include = FALSE}
+
+# PRISMA import
+
+Data.Prisma <- read_excel("2025_03_24_Master.complete_WithSuppression.xlsx") %>% 
+  filter(
+    redcap_event_name == "visite_1_arm_1",
+    HEALTHY_OR_ASTHMA == 1,
+    EXCLUDE == 0
+  ) %>% 
+  mutate(
+    Age_at_study_enrollment_rescale10 = Age_at_study_enrollment*0.1,
+    BMI_rescale5 = BMI/5,
+    Pre_FEV1_PORC_rescale = Pre_FEV1_PORC*-0.1,
+    Pre_FEV1_FVC_ratio_rescale = Pre_FEV1_FVC_ratio*-0.1,
+    Severe_asthma_attacks_past_12m_cat = ifelse(is.na(Total_exacerbations_12m),0,1),
+    BloodEOS_Abso_log10 = log10(BloodEOS_Abso),
+    FeNO_log10 = log10(FeNO),
+    ACQ5_rescale = acq5_moy * 2,
+    SpuEOS_PCT_log10 = log10(SpuEOS_PCT + 0.25),
+    PBS_EOTAX_log10 = log10(PBS_EOTAX),
+    PBS_IFNg_log10 = log10(PBS_IFNg),
+    PBS_IL13_log10 = log10(PBS_IL13),
+    PBS_IL4_log10 = log10(PBS_IL4),
+    PBS_IL5_log10 = log10(PBS_IL5),
+    PBS_IL33_log10 = log10(PBS_IL33),
+    PBS_TARC_log10 = log10(PBS_TARC),
+    PBS_TNFa_log10 = log10(PBS_TNFa),
+    PBS_TSLP_log10 = log10(PBS_TSLP),
+    PBS_PGD2_log10 = log10(PBS_PGD2),
+    
+    Rhinitis_cat = ifelse( Rhinitis == 0,"No","Yes"        ),
+    Chronic_sinusitis_cat = ifelse( Chronic_sinusitis == 0,0,1        ),
+    Nasal_Polyps_cat = ifelse( Nasal_Polyps == 0,0,1        ),
+    
+    CRSsNP = ifelse(Chronic_sinusitis_cat == 1 & Nasal_Polyps_cat == 0, "Yes", "No"),
+    CRSwNP = ifelse(Chronic_sinusitis_cat == 1 & Nasal_Polyps_cat == 1, "Yes", "No")
+  )
+
+val_lab(Data.Prisma$Severe_asthma_attacks_past_12m_cat) <- make_labels("
+                                                                       0 No
+                                                                       1 Yes   
+                                                                       ")
+
+Data.Prisma$Severe_asthma_attacks_past_12m_cat <-  as.factor(Data.Prisma$Severe_asthma_attacks_past_12m_cat )
+
+#Data.Prisma <- within(Data.Prisma, Severe_asthma_attacks_past_12m_cat <- relevel(Severe_asthma_attacks_past_12m_cat, ref = "No"))
+
+val_lab(Data.Prisma$Sex) <- make_labels("
+                                        1 Female
+                                        2 Male
+                                        ")
+Data.Prisma$Sex <- as.factor(Data.Prisma$Sex)
+
+Data.Prisma <- within(Data.Prisma, Sex <- relevel(Sex, ref = "Male"))
+
+
+val_lab(Data.Prisma$Tobacco) <- make_labels("
+                                        2 Never
+                                        3 Ex
+                                        ")
+Data.Prisma$Tobacco <- as.factor(Data.Prisma$Tobacco)
+
+Data.Prisma$T2_hothot_med_lowlow_ordinal <- Data.Prisma$T2_hothot_med_lowlow
+
+val_lab(Data.Prisma$T2_hothot_med_lowlow) <- make_labels("
+                                                                                 0 T2-Low/Low
+                                                                                 1 T2-Mid
+                                                                                 2 T2-High/High
+                                                                                 ")
+Data.Prisma$T2_hothot_med_lowlow <- as.factor(Data.Prisma$T2_hothot_med_lowlow)
+
+Data.Prisma$GINA_Step <- as.factor(Data.Prisma$GINA_Step)
+
+```
+
+```{r Data Oracle, include = FALSE, warning = FALSE}
+
+# ORACLE import
+
+Data.oracle <- read_excel("ORACLE_DATA_not_fleur_V23_2024-07-11_captainadherence and stratos fev1rev multiplied by 100.xlsx") 
+
+Data.oracle[Data.oracle == 9999] <- NA
+
+Data.oracle <- Data.oracle %>% 
+  mutate(
+    Age_rescale10 = Age / 10,
+    BMI_rescale5 = BMI / 5,
+    .after = Treatment_arm
+  ) %>% 
+  mutate(
+    BEC_log10 = log10(Blood_Eos_baseline_x10_9_cells_per_L + 0.25),
+    FeNO_log10 = log10(FeNO_baseline_ppb + 0.25),
+    FEV1_preBD_PCT_Baseline_rescale10 = -FEV1_preBD_PCT_Baseline / 10,
+    Pre_FEV1_FVC_ratio = FEV1_preBD_L_Baseline / FVC_preBD_L_Baseline * 100,
+    Pre_FEV1_FVC_ratio_rescale10 = -Pre_FEV1_FVC_ratio / 10,
+    ACQ5_rescale = ACQ_baseline_score_mean * 2,
+    CRSsNP = ifelse(Chronic_Rhinosinusitis_0no_1yes_9999notknown == 1 & Nasal_polyposis_0no_1yes_9999notknown == 0, "Yes", "No"),
+    CRSwNP = ifelse(Chronic_Rhinosinusitis_0no_1yes_9999notknown == 1 & Nasal_polyposis_0no_1yes_9999notknown == 1, "Yes", "No"),
+  )
+
+Data.oracle$Treatment_step <- as.factor(Data.oracle$Treatment_step)
+Data.oracle$CRSsNP <- as.factor(Data.oracle$CRSsNP)
+Data.oracle$CRSwNP <- as.factor(Data.oracle$CRSwNP)
+
+val_lab(Data.oracle$Any_severe_attack_previous_12m_0no_1yes) <- make_labels("
+                                                                            0 No
+                                                                            1 Yes
+                                                                            ")
+Data.oracle$Any_severe_attack_previous_12m_0no_1yes <- as.factor(Data.oracle$Any_severe_attack_previous_12m_0no_1yes)
+
+val_lab(Data.oracle$Gender_0Female_1Male) <- make_labels("
+                                                         0 Female
+                                                         1 Male
+                                                         ")
+Data.oracle$Gender_0Female_1Male <- as.factor(Data.oracle$Gender_0Female_1Male)
+Data.oracle$Gender_0Female_1Male <- relevel(Data.oracle$Gender_0Female_1Male, ref = "Male")
+
+val_lab(Data.oracle$Smoking_0never_1ex_2current) <- make_labels("
+                                                                0 Never
+                                                                1 Ex
+                                                                2 Current
+                                                                ")
+Data.oracle$Smoking_0never_1ex_2current <- as.factor(Data.oracle$Smoking_0never_1ex_2current)
+
+val_lab(Data.oracle$AllergicRhinitis__0no_1yes_9999notknown) <- make_labels("
+                                                                            0 No
+                                                                            1 Yes
+                                                                            ")
+Data.oracle$AllergicRhinitis__0no_1yes_9999notknown <- as.factor(Data.oracle$AllergicRhinitis__0no_1yes_9999notknown)
+
+val_lab(Data.oracle$Chronic_Rhinosinusitis_0no_1yes_9999notknown) <- make_labels("
+                                                                                 0 No
+                                                                                 1 Yes
+                                                                                 ")
+Data.oracle$Chronic_Rhinosinusitis_0no_1yes_9999notknown <- as.factor(Data.oracle$Chronic_Rhinosinusitis_0no_1yes_9999notknown)
+
+Data.oracle$T2_composite <- ifelse( Data.oracle$FeNO_baseline_ppb < 25 & Data.oracle$Blood_Eos_baseline_x10_9_cells_per_L < 0.15,0, 
+                                            ifelse(Data.oracle$FeNO_baseline_ppb >= 35 & Data.oracle$Blood_Eos_baseline_x10_9_cells_per_L >= 0.3,2,1  ))
+
+
+Data.oracle$T2_composite_ordinal <- Data.oracle$T2_composite
+
+
+val_lab(Data.oracle$T2_composite) <- make_labels("
+                                                                                 0 T2-Low/Low
+                                                                                 1 T2-Mid
+                                                                                 2 T2-High/High
+                                                                                 ")
+Data.oracle$T2_composite <- as.factor(Data.oracle$T2_composite)
+
+# Data Dream
+Data.oracle.dream <- Data.oracle %>% 
+  filter(Enrolled_Trial_name == "DREAM") %>% 
+  # Create a column for Placebo or Mepo
+  mutate(
+    Mepo_placebo = ifelse(Treatment_arm == "Placebo", "Placebo", "Mepo"),
+    .after = Treatment_arm
+  )
+
+Data.oracle.dream$Mepo_placebo <- as.factor(Data.oracle.dream$Mepo_placebo)
+Data.oracle.dream$Mepo_placebo <- relevel(Data.oracle.dream$Mepo_placebo, ref = "Placebo")
+
+```
+
+```{r Data Oracle imputed, include = FALSE, warning = FALSE}
+
+# ORACLE imputed import
+
+Data.oracle.imputed <- read_excel("data_ORACLE_imp_20250102_joined.xlsx")
+
+Data.oracle.imputed[Data.oracle.imputed == "NA"] <- NA
+
+Data.oracle.imputed <- Data.oracle.imputed %>% 
+  mutate(
+    Age_rescale10 = Age / 10,
+    BMI_rescale5 = BMI / 5,
+    .after = Treatment_arm
+  ) %>% 
+  mutate(
+    FEV1_preBD_PCT_Baseline_rescale10 = -FEV1_preBD_PCT_Baseline / 10,
+    FEV1_FVC_ratio_rescale10 = -FEV1_FVC_ratio / 10,
+    ACQ5_rescale = ACQ_baseline_score_mean * 2,
+    Severe_asthma_attacks_during_followup_yesno = ifelse(Number_severe_asthma_attacks_during_followup == 0, "No", "Yes"),
+    CRSsNP = ifelse(Chronic_Rhinosinusitis_0no_1yes_9999notknown == 1 & Nasal_polyposis_0no_1yes_9999notknown == 0, "Yes", "No"),
+    CRSwNP = ifelse(Chronic_Rhinosinusitis_0no_1yes_9999notknown == 1 & Nasal_polyposis_0no_1yes_9999notknown == 1, "Yes", "No")
+  )
+
+
+Data.oracle.imputed$Treatment_step <- as.factor(Data.oracle.imputed$Treatment_step)
+Data.oracle.imputed$CRSsNP <- as.factor(Data.oracle.imputed$CRSsNP)
+Data.oracle.imputed$CRSwNP <- as.factor(Data.oracle.imputed$CRSwNP)
+
+Data.oracle.imputed$Severe_asthma_attacks_during_followup_yesno <- as.factor(Data.oracle.imputed$Severe_asthma_attacks_during_followup_yesno)
+
+val_lab(Data.oracle.imputed$Gender_0Female_1Male) <- make_labels("
+                                                                 0 Female
+                                                                 1 Male
+                                                                 ")
+Data.oracle.imputed$Gender_0Female_1Male <- as.factor(Data.oracle.imputed$Gender_0Female_1Male)
+Data.oracle.imputed$Gender_0Female_1Male <- relevel(Data.oracle.imputed$Gender_0Female_1Male, ref = "Male")
+
+Data.oracle.imputed$.imp <- Data.oracle.imputed$.imp -1
+
+Data.imp <- as.mids(Data.oracle.imputed)
+
+# Oracle2 (imputed version) Any ACQ dataset (n = 750)
+exclude_trials <- c("AZISAST", "Novel_START", "PRACTICAL", "PACT", "DREAM")
+Data.oracle.any.acq <- Data.oracle.imputed %>% filter(Enrolled_Trial_name %in% exclude_trials)
+
+Data.oracle.any.acq$.imp <- Data.oracle.any.acq$.imp -1
+
+Data.imp.anyacq <- as.mids(Data.oracle.any.acq)
+
+Data.oracle.supp <- Data.oracle %>%
+  dplyr::semi_join(
+    Test1 %>%
+      dplyr::distinct(Subject_ID, Enrolled_Trial_name),
+    by = c("Subject_ID", "Enrolled_Trial_name")
+  ) 
+
+Data.oracle.supp.any.acq <- Data.oracle.supp %>% filter(Enrolled_Trial_name %in% exclude_trials)
+
+```
+
+```{r , include = FALSE}
+
+#RASP-UK import
+
+Data.raw.raspuk <- read_excel("RAW for SPSS v2 INCLUDES RASP-UK.xlsx") %>% 
+  filter(Healthy0Asthma1 == 1)
+
+Data.raw.raspuk[Data.raw.raspuk == 99999] <- NA
+
+Data.raw.raspuk <- Data.raw.raspuk %>% 
+  mutate(age_rescale10 = AgeD0 / 10,
+    BMI_rescale5 = BMI / 5,
+    BEC_log10 = log10(Blood_Eos_optimised + 0.25),
+    FeNO_log10 = log10(FeNO_optimised + 0.25),
+    FEV1_PCTpredicted_rescale10 = - FEV1_PCTpredicted_optimised / 10,
+    FEV1_FVC_ratio_rescale10 = - FEV1_FVC_ratio_optimised / 10,
+    Previous_asthma_attack_yesno = ifelse(Number_of_Rescue_Steriod_Courses_In_12_Mths == 0, "No", "Yes"),
+    Sp_Eos_optimised_log10 = log10(Sp_Eos_optimised + 0.25),
+    Eotaxin_3_Optimised_sputm_log10 = log10(`Eotaxin-3_Optimised_sputm`),
+    IFNgamma_Optimised_sputm_log10 = log10(IFNgamma_Optimised_sputm),
+    IL13_Optimised_sputm_log10 = log10(IL13_Optimised_sputm),
+    IL33_Optimised_sputm_log10 = log10(IL33_Optimised_sputm),
+    IL4_Optimised_sputm_log10 = log10(IL4_Optimised_sputm),
+    IL5_Optimised_sputm_log10 = log10(IL5_Optimised_sputm),
+    TARC_Optimised_sputm_log10 = log10(TARC_Optimised_sputm),
+    TNFalpha_Optimised_sputm_log10 = log10(TNFalpha_Optimised_sputm),
+    TSLP_Optimised_sputm_log10 = log10(TSLP_Optimised_sputm),
+    LTE4_Optimised_sputm_log10 = log10(LTE4_Optimised_sputm),
+    PGD2_Optimised_sputm_log10 = log10(PGD2_Optimised_sputm))
+
+Data.raw.raspuk$Previous_asthma_attack_yesno <- as.factor(Data.raw.raspuk$Previous_asthma_attack_yesno)
+
+val_lab(Data.raw.raspuk$Sex0M1F) <- make_labels("
+                                                0 Male
+                                                1 Female
+                                                ")
+Data.raw.raspuk$Sex0M1F <- as.factor(Data.raw.raspuk$Sex0M1F)
+
+Data.raw.raspuk$Gina_step <- NA
+
+val_lab(Data.raw.raspuk$Smoking_status_0nil_1ex_2active) <- make_labels("
+                                                  0 Never
+                                                  1 Ex
+                                                  2 Current
+                                                  ")
+Data.raw.raspuk$Smoking_status_0nil_1ex_2active <- as.factor(Data.raw.raspuk$Smoking_status_0nil_1ex_2active)
+
+
+Data.raw.raspuk$AllergicRhinitis__0no_1yes_9999notknown <- NA
+
+Data.raw.raspuk$CRSsNP <- NA
+
+Data.raw.raspuk$CRSwNP <- NA
+
+```
+
+```{r Data FeNO, echo = FALSE}
+
+Data.feno <- Data.raw.raspuk %>% 
+  filter(CohortOxf0Rasp1 == 0)
+
+```
+
+```{r Data RASP-UK, include = FALSE}
+
+Data.raspuk <- Data.raw.raspuk %>% 
+  filter(CohortOxf0Rasp1 == 1)
+
+```
+
+```{r Data Boost, include = FALSE}
+
+# BOOST import
+
+Data.boost <- read.csv("Data_Simon_final.csv", header = TRUE, sep = ",", dec = ".") %>% 
+  mutate(
+    delta = fev1_D7 - fev1_attack,
+    Previous_asthma_attack_yesno = ifelse(exac_12m == 0, "No", "Yes"),
+    BEC_log10 = log10(blood_eos_attack + 0.25),
+    FeNO_log10 = log10(feno_attack),
+    Age_rescale10 = Age / 10,
+    BMI_rescale5 =  BMI/5,
+    Pre_FEV1_PORC_rescale = fev1_pct_attack*-0.1,
+    Pre_FEV1_FVC_ratio_rescale = fev1_fvc_attack*-0.1,
+    ACQ5_rescale = acq_attack * 2,
+    SpuEOS_PCT_log10 = log10(Sputum_eos_attack + 0.25)  )
+
+Data.boost$Previous_asthma_attack_yesno <- as.factor(Data.boost$Previous_asthma_attack_yesno)
+
+val_lab(Data.boost$Sex) <- make_labels("
+                                       1 Male
+                                       2 Female
+                                       ")
+Data.boost$Sex <- as.factor(Data.boost$Sex)
+
+val_lab(Data.boost$Biologic) <- make_labels("
+                                            1 mepo
+                                            2 benra
+                                            3 reslizumab
+                                            ")
+Data.boost$Biologic <- as.factor(Data.boost$Biologic)
+
+val_lab(Data.boost$smoking_status) <- make_labels("
+                                                  1 Never
+                                                  2 Current
+                                                  3 Ex smoker
+                                                  ")
+Data.boost$smoking_status <- as.factor(Data.boost$smoking_status)
+
+Data.boost$Gina_step <- 5
+
+Data.boost$Gina_step <- as.factor(Data.boost$Gina_step)
+
+```
+
+# Table 1 {.tabset .tabset-fade}
+
+Frequencies and percentages will be presented for nominal variables. Means (standard deviation) and medians [interquartile range] will be presented for continuous variables. For comparisons between two groups, Mann-Whitney U tests will be used for continuous variables and Fisher's exact tests for categorical variables. For comparisons between three or more groups, Kruskal-Wallis tests will be used for continuous variables and Fisher's exact tests for categorical variables.
+
+## Master {.tabset .tabset-fade}
+
+### Non-parametric - Not Imputed
+
+```{r, echo = FALSE}
+# ORACLE2 - Full (n=6513)
+
+table1(~ BMI, 
+       data = Data.oracle.supp, 
+       render.continuous = c( .="Median [Q1 - Q3]"), 
+       render.categorical = "FREQ (PCTnoNA%)", 
+       topclass = "Rtable1-grid Rtable1-shade Rtable1-times")
+
+Data.oracle2.full.master <- Data.oracle.supp %>% 
+  dplyr::select(c("Sequential_number","Gender_0Female_1Male",'Age',"BMI","ACQ_baseline_score_mean","Any_severe_attack_previous_12m_0no_1yes","Treatment_step","FEV1_preBD_PCT_Baseline","Pre_FEV1_FVC_ratio","Blood_Eos_baseline_x10_9_cells_per_L","FeNO_baseline_ppb","Smoking_0never_1ex_2current","AllergicRhinitis__0no_1yes_9999notknown","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "ORACLE2 - Full",
+         ACQ_below_1.5 = ifelse(is.na(ACQ_baseline_score_mean), NA,
+                                ifelse(ACQ_baseline_score_mean < 1.5, "Yes", "No")))
+
+# ORACLE2 - Any ACQ (n=750)
+Data.oracle2.anyacq.master <- Data.oracle.supp.any.acq %>% 
+  dplyr::select(c("Sequential_number","Gender_0Female_1Male",'Age',"BMI","ACQ_baseline_score_mean","Any_severe_attack_previous_12m_0no_1yes","Treatment_step","FEV1_preBD_PCT_Baseline","Pre_FEV1_FVC_ratio","Blood_Eos_baseline_x10_9_cells_per_L","FeNO_baseline_ppb","Smoking_0never_1ex_2current","AllergicRhinitis__0no_1yes_9999notknown","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "ORACLE2 - Any ACQ",
+         ACQ_below_1.5 = ifelse(is.na(ACQ_baseline_score_mean), NA,
+                                ifelse(ACQ_baseline_score_mean < 1.5, "Yes", "No")))
+
+# DREAM - Placebo
+Data.oracle.dream.placebo.master <- Data.oracle.dream %>% 
+  filter(Mepo_placebo == "Placebo") %>%
+  dplyr::select(c("Sequential_number","Gender_0Female_1Male",'Age',"BMI","ACQ_baseline_score_mean","Any_severe_attack_previous_12m_0no_1yes","Treatment_step","FEV1_preBD_PCT_Baseline","Pre_FEV1_FVC_ratio","Blood_Eos_baseline_x10_9_cells_per_L","FeNO_baseline_ppb","Smoking_0never_1ex_2current","AllergicRhinitis__0no_1yes_9999notknown","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "DREAM - Placebo",
+         ACQ_below_1.5 = ifelse(is.na(ACQ_baseline_score_mean), NA,
+                                ifelse(ACQ_baseline_score_mean < 1.5, "Yes", "No")))
+
+# DREAM - Mepo
+Data.oracle.dream.mepo.master <- Data.oracle.dream %>% 
+  filter(Mepo_placebo == "Mepo") %>%
+  dplyr::select(c("Sequential_number","Gender_0Female_1Male",'Age',"BMI","ACQ_baseline_score_mean","Any_severe_attack_previous_12m_0no_1yes","Treatment_step","FEV1_preBD_PCT_Baseline","Pre_FEV1_FVC_ratio","Blood_Eos_baseline_x10_9_cells_per_L","FeNO_baseline_ppb","Smoking_0never_1ex_2current","AllergicRhinitis__0no_1yes_9999notknown","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "DREAM - Mepo",
+         ACQ_below_1.5 = ifelse(is.na(ACQ_baseline_score_mean), NA,
+                                ifelse(ACQ_baseline_score_mean < 1.5, "Yes", "No")))
+
+# SA-OIT (FeNO + RASP-UK)
+Data.raw.raspuk.master <- Data.raw.raspuk %>% 
+  dplyr::select(c("FENO_DiarySeqNumber","Sex0M1F",'AgeD0',"BMI","ACQ_optimised","Previous_asthma_attack_yesno","Gina_step","FEV1_PCTpredicted_optimised","FEV1_FVC_ratio_optimised","Blood_Eos_optimised","FeNO_optimised","Smoking_status_0nil_1ex_2active","AllergicRhinitis__0no_1yes_9999notknown","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "SA-OIT",
+         ACQ_below_1.5 = ifelse(is.na(ACQ_optimised), NA,
+                                ifelse(ACQ_optimised < 1.5, "Yes", "No"))) %>% 
+  rename(Sequential_number = FENO_DiarySeqNumber,
+         Gender_0Female_1Male = Sex0M1F,
+         Age = AgeD0,
+         ACQ_baseline_score_mean = ACQ_optimised,
+         Any_severe_attack_previous_12m_0no_1yes = Previous_asthma_attack_yesno,
+         Treatment_step = Gina_step,
+         FEV1_preBD_PCT_Baseline = FEV1_PCTpredicted_optimised,
+         Pre_FEV1_FVC_ratio = FEV1_FVC_ratio_optimised,
+         Blood_Eos_baseline_x10_9_cells_per_L = Blood_Eos_optimised,
+         FeNO_baseline_ppb = FeNO_optimised,
+         Smoking_0never_1ex_2current = Smoking_status_0nil_1ex_2active)
+
+# PRISMA
+Data.Prisma.master <- Data.Prisma %>% 
+  dplyr::select(c("ID","Sex",'Age_at_study_enrollment',"BMI","acq5_moy","Severe_asthma_attacks_past_12m_cat","GINA_Step","Pre_FEV1_PORC","Pre_FEV1_FVC_ratio","BloodEOS_Abso","FeNO","Tobacco","Rhinitis_cat","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "PRISMA",
+         ACQ_below_1.5 = ifelse(is.na(acq5_moy), NA,
+                                ifelse(acq5_moy < 1.5, "Yes", "No"))) %>% 
+  rename(Sequential_number = ID,
+         Gender_0Female_1Male = Sex,
+         Age = Age_at_study_enrollment,
+         ACQ_baseline_score_mean = acq5_moy,
+         Any_severe_attack_previous_12m_0no_1yes = Severe_asthma_attacks_past_12m_cat,
+         Treatment_step = GINA_Step,
+         FEV1_preBD_PCT_Baseline = Pre_FEV1_PORC,
+         Blood_Eos_baseline_x10_9_cells_per_L = BloodEOS_Abso,
+         FeNO_baseline_ppb = FeNO,
+         Smoking_0never_1ex_2current = Tobacco,
+         AllergicRhinitis__0no_1yes_9999notknown = Rhinitis_cat)
+
+# BOOST
+Data.boost.master <- Data.boost %>% 
+  dplyr::select(c("study_id","Sex",'Age',"BMI","acq_attack","Previous_asthma_attack_yesno","Gina_step","fev1_pct_attack","fev1_fvc_attack","blood_eos_attack","feno_attack","smoking_status","Allergic_rhinitis","CRSsNP","CRSwNP")) %>% 
+  mutate(Study = "BOOST",
+         ACQ_below_1.5 = ifelse(is.na(acq_attack), NA,
+                                ifelse(acq_attack < 1.5, "Yes", "No"))) %>% 
+  rename(Sequential_number = study_id,
+         Gender_0Female_1Male = Sex,
+         ACQ_baseline_score_mean = acq_attack,
+         Any_severe_attack_previous_12m_0no_1yes = Previous_asthma_attack_yesno,
+         Treatment_step = Gina_step,
+         FEV1_preBD_PCT_Baseline = fev1_pct_attack,
+         Pre_FEV1_FVC_ratio = fev1_fvc_attack,
+         Blood_Eos_baseline_x10_9_cells_per_L = blood_eos_attack,
+         FeNO_baseline_ppb = feno_attack,
+         Smoking_0never_1ex_2current = smoking_status,
+         AllergicRhinitis__0no_1yes_9999notknown = Allergic_rhinitis)
+
+val_lab(Data.oracle2.full.master$Any_severe_attack_previous_12m_0no_1yes) <- make_labels("
+                                           0 No
+                                           1 Yes
+                                            ")
+Data.oracle2.full.master$Any_severe_attack_previous_12m_0no_1yes <- as.factor(Data.oracle2.full.master$Any_severe_attack_previous_12m_0no_1yes)
+
+val_lab(Data.oracle2.full.master$Smoking_0never_1ex_2current) <- make_labels("
+                                           0 Never
+                                           1 Ex
+                                           2 Current
+                                            ")
+Data.oracle2.full.master$Smoking_0never_1ex_2current <- as.factor(Data.oracle2.full.master$Smoking_0never_1ex_2current)
+
+val_lab(Data.oracle2.full.master$AllergicRhinitis__0no_1yes_9999notknown) <- make_labels("
+                                           0 No
+                                           1 Yes
+                                            ")
+Data.oracle2.full.master$AllergicRhinitis__0no_1yes_9999notknown <- as.factor(Data.oracle2.full.master$AllergicRhinitis__0no_1yes_9999notknown)
+
+
+val_lab(Data.oracle2.anyacq.master$Any_severe_attack_previous_12m_0no_1yes) <- make_labels("
+                                           0 No
+                                           1 Yes
+                                            ")
+Data.oracle2.anyacq.master$Any_severe_attack_previous_12m_0no_1yes <- as.factor(Data.oracle2.anyacq.master$Any_severe_attack_previous_12m_0no_1yes)
+
+val_lab(Data.oracle2.anyacq.master$Smoking_0never_1ex_2current) <- make_labels("
+                                           0 Never
+                                           1 Ex
+                                           2 Current
+                                            ")
+Data.oracle2.anyacq.master$Smoking_0never_1ex_2current <- as.factor(Data.oracle2.anyacq.master$Smoking_0never_1ex_2current)
+
+val_lab(Data.oracle2.anyacq.master$AllergicRhinitis__0no_1yes_9999notknown) <- make_labels("
+                                           0 No
+                                           1 Yes
+                                            ")
+Data.oracle2.anyacq.master$AllergicRhinitis__0no_1yes_9999notknown <- as.factor(Data.oracle2.anyacq.master$AllergicRhinitis__0no_1yes_9999notknown)
+
+Data.boost.master$Smoking_0never_1ex_2current <- ifelse( Data.boost.master$Smoking_0never_1ex_2current == "Never","Never", "Ex"          )
+
+
+
+# Combine all datasets
+Data.master <- rbind(
+  Data.oracle2.full.master,
+  Data.oracle2.anyacq.master,
+  Data.oracle.dream.placebo.master,
+  Data.oracle.dream.mepo.master,
+  Data.raw.raspuk.master,
+  Data.Prisma.master,
+  Data.boost.master
+)
+
+# Set factor levels to control column order
+Data.master$Study <- factor(Data.master$Study, 
+                             levels = c("ORACLE2 - Full", "ORACLE2 - Any ACQ",
+                                        "DREAM - Placebo", "DREAM - Mepo",
+                                        "SA-OIT", "PRISMA", "BOOST"))
+
+Data.master$Treatment_step <- as.factor(Data.master$Treatment_step)
+
+# Convert ACQ_below_1.5 to factor
+Data.master$ACQ_below_1.5 <- as.factor(Data.master$ACQ_below_1.5)
+
+table1(~ Gender_0Female_1Male + Age + BMI + ACQ_baseline_score_mean + ACQ_below_1.5 + Any_severe_attack_previous_12m_0no_1yes + Treatment_step + FEV1_preBD_PCT_Baseline + Pre_FEV1_FVC_ratio + Blood_Eos_baseline_x10_9_cells_per_L + FeNO_baseline_ppb + Smoking_0never_1ex_2current + AllergicRhinitis__0no_1yes_9999notknown + CRSsNP + CRSwNP | Study, 
+       data = Data.master, overall = F, 
+       extra.col = list("P-value" = pvalue2), 
+       render.continuous = c( .="Median [Q1 - Q3]"), 
+       render.categorical = "FREQ (PCTnoNA%)", 
+       topclass = "Rtable1-grid Rtable1-shade Rtable1-times")
+```
+
+### Parametric - Not Imputed
+
+```{r, echo = FALSE}
+
+table1(~ Gender_0Female_1Male + Age + BMI + ACQ_baseline_score_mean + Any_severe_attack_previous_12m_0no_1yes + Treatment_step + FEV1_preBD_PCT_Baseline + Pre_FEV1_FVC_ratio + Blood_Eos_baseline_x10_9_cells_per_L + FeNO_baseline_ppb + Smoking_0never_1ex_2current + AllergicRhinitis__0no_1yes_9999notknown + CRSsNP + CRSwNP | Study, 
+       data = Data.master, overall = F, 
+       extra.col = list("P-value" = pvalue4), 
+       render.continuous = c( .="Median [Q1 - Q3]"), 
+       render.categorical = "FREQ (PCTnoNA%)", 
+       topclass = "Rtable1-grid Rtable1-shade Rtable1-times")
+```
